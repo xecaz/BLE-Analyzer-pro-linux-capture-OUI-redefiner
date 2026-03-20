@@ -20,6 +20,15 @@
 #include <errno.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <signal.h>
+
+static volatile sig_atomic_t g_interrupted = 0;
+
+static void sigint_handler(int sig)
+{
+    (void)sig;
+    g_interrupted = 1;
+}
 
 /* ---------- constants ---------- */
 
@@ -1105,7 +1114,7 @@ static int cmd_process_text(FILE *fin)
     }
 
     char line[MAX_LINE];
-    while (fgets(line, sizeof(line), fin)) {
+    while (!g_interrupted && fgets(line, sizeof(line), fin)) {
         /* Trim trailing newline */
         int len = strlen(line);
         while (len > 0 && (line[len-1] == '\n' || line[len-1] == '\r'))
@@ -1116,7 +1125,7 @@ static int cmd_process_text(FILE *fin)
 
         if (parse_sniffer_line(line, mac_str, pdu_hex, sizeof(pdu_hex)) != 0) {
             /* Pass through unparseable lines unchanged */
-            printf("%s\n", line);
+            if (printf("%s\n", line) < 0) break;
             fflush(stdout);
             continue;
         }
@@ -1143,7 +1152,8 @@ static int cmd_process_text(FILE *fin)
             }
         }
 
-        printf("%s  | %s | %s | %s\n", line, addr_type, oui_name, cid_name);
+        if (printf("%s  | %s | %s | %s\n", line, addr_type, oui_name, cid_name) < 0)
+            break;
         fflush(stdout);
     }
 
@@ -1427,6 +1437,9 @@ static void usage(const char *prog)
 
 int main(int argc, char **argv)
 {
+    signal(SIGINT, sigint_handler);
+    signal(SIGPIPE, SIG_IGN);
+
     if (argc < 2) {
         usage(argv[0]);
         return 1;
